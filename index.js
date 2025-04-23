@@ -4,7 +4,6 @@ const cheerio = require("cheerio");
 const app = express();
 app.use(express.json());
 
-// Standard fallback
 const fallbackLocation = { name: "Oslo", lat: 59.91, lon: 10.75 };
 
 // Hent koordinater fra Open-Meteo
@@ -31,21 +30,28 @@ async function getWeatherText(lat, lon, placeName) {
   }
 }
 
-// Hent nettsideinnhold
-async function getWebsiteText() {
+// Hent relevant nettsidetekst
+async function getWebsiteText(userInput = "") {
   try {
     const { data } = await axios.get("https://nsp.no");
     const $ = cheerio.load(data);
-    const firstParagraph = $("p").first().text().trim();
-    if (!firstParagraph) return "Fant ikke relevant tekst på nettsiden.";
-    return firstParagraph;
+
+    const allText = $("p").map((_, el) => $(el).text().trim()).get();
+    const keywords = ["pris", "betaling", "kontakt", "åpent", "telefon", "epost"];
+    const userWords = userInput.toLowerCase();
+
+    const match = allText.find(p =>
+      keywords.some(word => p.toLowerCase().includes(word) && userWords.includes(word))
+    );
+
+    return match || "Jeg fant ikke relevant info, men du kan lese mer på https://nsp.no";
   } catch (err) {
-    console.error("Feil ved nettsidesøk:", err.message);
+    console.error("Nettside-feil:", err.message);
     return "Klarte ikke hente innhold fra nettsiden.";
   }
 }
 
-// Webhook for Dialogflow
+// Webhook-endepunkt for Dialogflow
 app.post("/webhook", async (req, res) => {
   const intent = req.body.queryResult.intent.displayName;
   const location = req.body.queryResult.parameters?.location;
@@ -58,7 +64,8 @@ app.post("/webhook", async (req, res) => {
   }
 
   if (intent === "get_website_info") {
-    const siteText = await getWebsiteText();
+    const userInput = req.body.queryResult.queryText;
+    const siteText = await getWebsiteText(userInput);
     return res.json({ fulfillmentText: siteText });
   }
 
